@@ -20,6 +20,8 @@ spec:
       labels:
         app: models
     spec:
+      imagePullSecrets:
+        - name: ghcr-secret
       containers:
         - name: models
           image: ghcr.io/hanzoai/models:latest
