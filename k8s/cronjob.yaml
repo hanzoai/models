@@ -1,0 +1,30 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: models-sync
+  namespace: hanzo
+spec:
+  schedule: "0 4 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: sync
+              image: curlimages/curl:latest
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  curl -sf -X POST \
+                    -H "Authorization: Bearer $(MODELS_API_KEY)" \
+                    http://models.hanzo.svc.cluster.local:8080/v1/sync
+              envFrom:
+                - secretRef:
+                    name: models-secrets
+                    optional: true
