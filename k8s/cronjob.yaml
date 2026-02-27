@@ -22,7 +22,7 @@ spec:
                 - -c
                 - |
                   curl -sf -X POST \
-                    -H "Authorization: Bearer $(MODELS_API_KEY)" \
+                    -H "Authorization: Bearer ${MODELS_API_KEY}" \
                     http://models.hanzo.svc.cluster.local:8080/v1/sync
               envFrom:
                 - secretRef:

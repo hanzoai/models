@@ -11,6 +11,20 @@ import { allModels, families } from '@zenlm/models'
 
 const DATA_FILE = new URL('../data/models.json', import.meta.url).pathname
 const OPENROUTER_API = 'https://openrouter.ai/api/v1/models'
+const FETCH_TIMEOUT_MS = 30_000
+
+/**
+ * Fetch with timeout to prevent hanging.
+ */
+async function fetchWithTimeout(url, opts = {}) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+  try {
+    return await fetch(url, { ...opts, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 /**
  * Fetch third-party model definitions from OpenRouter.
@@ -18,7 +32,7 @@ const OPENROUTER_API = 'https://openrouter.ai/api/v1/models'
  */
 async function fetchThirdPartyModels() {
   try {
-    const res = await fetch(OPENROUTER_API)
+    const res = await fetchWithTimeout(OPENROUTER_API)
     if (!res.ok) throw new Error(`OpenRouter ${res.status}`)
     const { data } = await res.json()
 
@@ -115,15 +129,22 @@ function transformZenModel(m) {
 
 /**
  * Run full sync and write data file.
+ * Accepts previousData to preserve third-party models on upstream failure.
  */
-export async function runSync() {
+export async function runSync(previousData = null) {
   console.log('[sync] starting...')
 
   // Zen models from @zenlm/models (canonical)
   const zenModels = allModels.map(transformZenModel)
 
   // Third-party from OpenRouter (definitions only)
-  const thirdPartyModels = await fetchThirdPartyModels()
+  let thirdPartyModels = await fetchThirdPartyModels()
+
+  // Preserve previous third-party data if OpenRouter returned empty
+  if (thirdPartyModels.length === 0 && previousData?.thirdPartyModels?.length > 0) {
+    console.warn('[sync] OpenRouter returned 0 models — preserving previous third-party data')
+    thirdPartyModels = previousData.thirdPartyModels
+  }
 
   // Providers
   const providers = buildProviders(thirdPartyModels)
