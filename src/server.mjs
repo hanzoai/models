@@ -24,7 +24,7 @@ app.use(express.json())
 // CORS
 app.use((req, res, next) => {
   res.set('Access-Control-Allow-Origin', '*')
-  res.set('Access-Control-Allow-Methods', 'GET, OPTIONS')
+  res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
   res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization')
   if (req.method === 'OPTIONS') return res.sendStatus(204)
   next()
@@ -32,26 +32,42 @@ app.use((req, res, next) => {
 
 // Cache headers — model definitions change infrequently
 app.use('/v1', (req, res, next) => {
+  if (data) {
+    res.set('ETag', `"${data.updated}"`)
+    if (req.headers['if-none-match'] === `"${data.updated}"`) {
+      return res.sendStatus(304)
+    }
+  }
   res.set('Cache-Control', 'public, max-age=3600, s-maxage=3600')
   next()
 })
 
 let data = null
 let lastSync = null
+let syncInProgress = false
 
 async function loadData() {
   if (!existsSync(DATA_FILE)) return null
-  const raw = await readFile(DATA_FILE, 'utf-8')
-  return JSON.parse(raw)
+  try {
+    const raw = await readFile(DATA_FILE, 'utf-8')
+    return JSON.parse(raw)
+  } catch (err) {
+    console.warn('[models] Could not parse cached data file:', err.message)
+    return null
+  }
 }
 
 async function sync() {
+  if (syncInProgress) return
+  syncInProgress = true
   try {
-    data = await runSync()
+    data = await runSync(data)
     lastSync = new Date().toISOString()
     console.log(`[sync] OK — ${data.summary.zenModels} zen, ${data.summary.thirdPartyModels} third-party`)
   } catch (err) {
     console.error('[sync] FAILED:', err.message)
+  } finally {
+    syncInProgress = false
   }
 }
 
@@ -166,7 +182,7 @@ app.get('/v1/models/:id', (req, res) => {
 
 // ── Manual sync trigger ────────────────────────────────────────────────
 
-app.post('/v1/sync', (req, res) => {
+app.post('/v1/sync', async (req, res) => {
   const key = process.env.MODELS_API_KEY
   if (key) {
     const auth = req.headers.authorization
@@ -174,16 +190,40 @@ app.post('/v1/sync', (req, res) => {
       return res.status(401).json({ error: 'unauthorized' })
     }
   }
-  sync().then(() => res.json({ status: 'ok', lastSync }))
+  if (syncInProgress) return res.json({ status: 'skipped', reason: 'sync in progress', lastSync })
+  await sync()
+  res.json({ status: data ? 'ok' : 'error', lastSync })
 })
 
 // ── Start ──────────────────────────────────────────────────────────────
 
 const server = app.listen(PORT, async () => {
   console.log(`[models] listening on :${PORT}`)
-  await sync()
-  setInterval(sync, SYNC_INTERVAL_MS)
+
+  // Load cached data from disk immediately so we serve data without blocking
+  const cached = await loadData()
+  if (cached) {
+    data = cached
+    lastSync = cached.updated
+    console.log(`[models] loaded cached data (${data.summary.totalModels} models)`)
+  }
+
+  // Sync from upstream in background — don't block startup
+  sync()
+  syncInterval = setInterval(sync, SYNC_INTERVAL_MS)
 })
 
-process.on('SIGTERM', () => { server.close(); process.exit(0) })
-process.on('SIGINT', () => { server.close(); process.exit(0) })
+let syncInterval = null
+
+function shutdown(signal) {
+  console.log(`[models] ${signal} received, shutting down`)
+  if (syncInterval) clearInterval(syncInterval)
+  server.close(() => {
+    console.log('[models] server closed')
+    process.exit(0)
+  })
+  setTimeout(() => process.exit(1), 10000).unref()
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'))
+process.on('SIGINT', () => shutdown('SIGINT'))
