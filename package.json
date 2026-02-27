@@ -3,14 +3,13 @@
   "version": "1.0.0",
   "type": "module",
   "private": true,
-  "description": "Model registry API for models.hanzo.ai",
+  "description": "Model registry API for models.hanzo.ai — discovers available models from zen-gateway + OpenRouter",
   "scripts": {
     "start": "node src/server.mjs",
     "sync": "node src/sync.mjs",
     "dev": "node --watch src/server.mjs"
   },
   "dependencies": {
-    "@zenlm/models": "^1.0.0",
     "express": "^4.21.0"
   }
 }

@@ -1,12 +1,14 @@
 /**
  * models.hanzo.ai — Model Registry API
  *
- * Serves cacheable model definitions for Zen + third-party models.
- * Orthogonal to pricing.hanzo.ai — definitions here, prices there.
+ * DISCOVERY: What models are available right now?
+ * Orthogonal to pricing.hanzo.ai (what does it cost?).
  *
- * Sources:
- *   - Zen models: @zenlm/models (canonical, npm package)
- *   - Third-party: OpenRouter /api/v1/models (synced daily)
+ * Sources (all live, no static imports):
+ *   - Zen models: api.hanzo.ai/v1/models (zen-gateway)
+ *   - Third-party: OpenRouter /api/v1/models
+ *
+ * Syncs every hour. CF caches at edge (1h TTL, ETag for revalidation).
  */
 
 import express from 'express'
@@ -16,7 +18,7 @@ import { runSync } from './sync.mjs'
 
 const PORT = process.env.PORT || 8080
 const DATA_FILE = new URL('../data/models.json', import.meta.url).pathname
-const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000 // 6 hours
+const SYNC_INTERVAL_MS = 1 * 60 * 60 * 1000 // 1 hour — AI moves fast
 
 const app = express()
 app.use(express.json())
