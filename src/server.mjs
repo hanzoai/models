@@ -73,6 +73,12 @@ async function sync() {
   }
 }
 
+// ── Root ────────────────────────────────────────────────────────────────
+
+app.get('/', (req, res) => {
+  res.json({ status: 'ok', service: 'models.hanzo.ai', version: '1.0.0' })
+})
+
 // ── Health ──────────────────────────────────────────────────────────────
 
 app.get('/health', (req, res) => {
