@@ -21,9 +21,9 @@ spec:
                 - /bin/sh
                 - -c
                 - |
-                  curl -sf -X POST \
+                  curl -sf --max-time 300 -X POST \
                     -H "Authorization: Bearer ${MODELS_API_KEY}" \
-                    http://models.hanzo.svc.cluster.local:8080/v1/sync
+                    http://models.hanzo.svc.cluster.local/v1/sync
               envFrom:
                 - secretRef:
                     name: models-secrets
