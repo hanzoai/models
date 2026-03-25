@@ -5,10 +5,9 @@ metadata:
   namespace: hanzo
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
-    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
-    nginx.ingress.kubernetes.io/enable-cors: "true"
+    traefik.ingress.kubernetes.io/router.tls: "true"
 spec:
-  ingressClassName: nginx
+  ingressClassName: hanzo
   tls:
     - hosts:
         - models.hanzo.ai
