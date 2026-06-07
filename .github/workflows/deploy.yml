@@ -1,0 +1,40 @@
+name: Docker
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Caller permissions are a CEILING for the reusable workflow. Without
+# id-token: write at this top level the dispatch dies as startup_failure.
+permissions:
+  contents: read
+  id-token: write
+  packages: write
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: hanzo-build-linux-amd64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Validate startup
+        run: timeout 5 node src/server.mjs || true
+        env:
+          PORT: 8080
+
+  docker:
+    if: github.event_name != 'pull_request'
+    uses: hanzoai/.github/.github/workflows/docker-build.yml@main
+    with:
+      image: ghcr.io/hanzoai/models
+      platforms: linux/amd64
+    secrets: inherit
