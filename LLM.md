@@ -1,4 +1,4 @@
-# LLM.md - Hanzo Models
+# Hanzo Models
 
 ## Overview
 Model registry API for models.hanzo.ai — discovers available models from zen-gateway + OpenRouter
