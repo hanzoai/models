@@ -1,11 +1,16 @@
 /**
  * Sync module — discovers available models from live upstream sources.
  *
- * Zen models:    api.hanzo.ai/v1/models (zen-gateway, the source of truth)
- * Third-party:   OpenRouter /api/v1/models (definitions only, no pricing)
+ * THE GATEWAY IS THE SOURCE OF TRUTH, for both halves of the catalog and for
+ * every number in it. api.hanzo.ai/v1/models states what is routable right now
+ * and what each route costs, and the id shape splits the listing the same way
+ * the gateway publishes it: a bare id is ours, a `vendor/model` id is a lab's.
+ * So the page can never advertise a model the endpoint does not serve, and a
+ * price on the page is the price that will be billed.
  *
- * Zen model metadata (descriptions, specs, families) lives in zenCatalog
- * below. The gateway tells us WHAT'S ENABLED — the catalog enriches it.
+ * Prose is enrichment, and each half has its own source: zenCatalog below for
+ * ours, the OpenRouter listing for the labs'. Enrichment can only add a name and
+ * a description to an id the gateway already listed — it never adds a model.
  *
  * No npm package imports. Everything is live.
  */
@@ -128,26 +133,21 @@ const zenFamilies = [
 // ── Discovery ───────────────────────────────────────────────────────────
 
 /**
- * Discover enabled Zen models from api.hanzo.ai (zen-gateway).
- * Returns the list of model IDs that are actually routable right now.
+ * Read the gateway listing — every model routable right now, ours and the labs'.
+ * One read, because both halves of the catalog and every price come out of it.
  */
-async function discoverZenModels() {
+async function fetchGateway() {
   const url = `${ZEN_GATEWAY_URL}/v1/models`
-  console.log(`[sync] Discovering Zen models from ${url}...`)
+  console.log(`[sync] Reading the gateway listing from ${url}...`)
   try {
     const res = await fetchWithTimeout(url)
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-    const { data: models } = await res.json()
-
-    // Zen models have no slash in id (third-party have provider/model format)
-    const zenIds = models
-      .filter(m => !m.id.includes('/'))
-      .map(m => m.id)
-
-    console.log(`[sync] Discovered ${zenIds.length} enabled Zen models from gateway`)
-    return zenIds
+    const { data } = await res.json()
+    const models = (data || []).filter(m => m && typeof m.id === 'string' && m.id.trim())
+    console.log(`[sync] Gateway lists ${models.length} models`)
+    return models
   } catch (err) {
-    console.error(`[sync] Gateway discovery failed: ${err.message}`)
+    console.error(`[sync] Gateway read failed: ${err.message}`)
     return []
   }
 }
@@ -211,31 +211,71 @@ function buildZenModels(enabledIds) {
 }
 
 /**
- * Fetch third-party model definitions from OpenRouter.
- * Definitions only — pricing is pricing.hanzo.ai's job.
+ * Prose for the labs' models, keyed by the id the gateway routes. A name and a
+ * description and nothing else — what a model IS and what it COSTS come from the
+ * gateway, so nothing here can put a model on the page or change its price.
  */
-async function fetchThirdPartyModels() {
+async function fetchThirdPartyProse() {
   try {
-    console.log('[sync] Fetching third-party models from OpenRouter...')
     const res = await fetchWithTimeout(OPENROUTER_API)
-    if (!res.ok) throw new Error(`OpenRouter ${res.status}`)
+    if (!res.ok) throw new Error(`${res.status}`)
     const { data } = await res.json()
-    console.log(`[sync] Got ${data.length} models from OpenRouter`)
-
-    return data.map(m => ({
-      id: m.id,
-      name: m.name,
-      provider: deriveProvider(m.id),
-      description: m.description || null,
-      context: m.context_length || null,
-      modalities: deriveModalities(m),
-      status: 'available',
-      category: 'third-party',
-    }))
+    const prose = new Map()
+    for (const m of data || []) {
+      if (!m?.id) continue
+      prose.set(m.id, { name: (m.name || '').trim() || null, description: plain(m.description) })
+    }
+    console.log(`[sync] Prose for ${prose.size} lab models`)
+    return prose
   } catch (err) {
-    console.error('[sync] OpenRouter fetch failed:', err.message)
-    return []
+    console.error('[sync] Prose fetch failed:', err.message)
+    return new Map()
   }
+}
+
+/**
+ * Prose as a page can render it: markdown links become their own text and bare
+ * URLs are dropped. A description written for someone else's site carries their
+ * links, and a static page renders neither the markup nor the link — it prints
+ * both, verbatim, in the middle of a sentence.
+ */
+function plain(text) {
+  if (typeof text !== 'string') return null
+  const out = text
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim()
+  return out || null
+}
+
+/** A readable name for an id no prose describes: the model half, as written. */
+function nameFromId(id) {
+  const tail = id.slice(id.indexOf('/') + 1)
+  return tail || id
+}
+
+/**
+ * The labs' half of the gateway listing: every `vendor/model` route, carrying the
+ * context and price the gateway states, named and described where prose has it.
+ */
+function buildThirdPartyModels(gateway, prose) {
+  return gateway
+    .filter(m => m.id.includes('/'))
+    .map(m => {
+      const p = prose.get(m.id)
+      return {
+        id: m.id,
+        name: p?.name || nameFromId(m.id),
+        provider: deriveProvider(m.id),
+        description: p?.description || null,
+        context: m.context_window || null,
+        pricing: m.pricing ? { input: m.pricing.input ?? null, output: m.pricing.output ?? null } : null,
+        modalities: m.supports_vision ? ['text', 'vision'] : ['text'],
+        status: 'available',
+        category: 'third-party',
+      }
+    })
 }
 
 function deriveProvider(id) {
@@ -252,17 +292,6 @@ function deriveProvider(id) {
   return map[prefix] || prefix.charAt(0).toUpperCase() + prefix.slice(1)
 }
 
-function deriveModalities(m) {
-  const mods = []
-  const arch = m.architecture?.modality || ''
-  if (arch.includes('text')) mods.push('text')
-  if (arch.includes('image') || m.id?.includes('vision')) mods.push('vision')
-  if (arch.includes('audio')) mods.push('audio')
-  if (m.id?.includes('coder') || m.id?.includes('code')) mods.push('code')
-  if (mods.length === 0) mods.push('text')
-  return mods
-}
-
 function buildProviders(thirdParty) {
   const providers = {}
   for (const m of thirdParty) {
@@ -276,14 +305,15 @@ function buildProviders(thirdParty) {
 // ── Main sync ───────────────────────────────────────────────────────────
 
 /**
- * Run full sync: discover from gateway + OpenRouter, write to disk.
- * Accepts previousData to preserve third-party on upstream failure.
+ * Run full sync: read the gateway, dress it in prose, write to disk.
+ * Accepts previousData to preserve each half on upstream failure.
  */
 export async function runSync(previousData = null) {
   console.log('[sync] starting...')
 
-  // 1. Discover enabled Zen models from zen-gateway (via api.hanzo.ai)
-  const enabledIds = await discoverZenModels()
+  // 1. The gateway listing — both halves of the catalog, and every price.
+  const gateway = await fetchGateway()
+  const enabledIds = gateway.filter(m => !m.id.includes('/')).map(m => m.id)
 
   // If gateway is down, preserve previous zen data
   let zenModels
@@ -294,10 +324,10 @@ export async function runSync(previousData = null) {
     zenModels = buildZenModels(enabledIds)
   }
 
-  // 2. Fetch third-party from OpenRouter
-  let thirdPartyModels = await fetchThirdPartyModels()
+  // 2. The labs' half, dressed in prose.
+  let thirdPartyModels = buildThirdPartyModels(gateway, await fetchThirdPartyProse())
   if (thirdPartyModels.length === 0 && previousData?.thirdPartyModels?.length > 0) {
-    console.warn('[sync] OpenRouter returned 0 models — preserving previous third-party data')
+    console.warn('[sync] Gateway listed no lab models — preserving previous third-party data')
     thirdPartyModels = previousData.thirdPartyModels
   }
 
