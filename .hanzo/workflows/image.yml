@@ -1,0 +1,107 @@
+name: Image
+
+# The image for models.hanzo.ai, built on the native runners (git.hanzo.ai →
+# git-runner). It replaces .github/workflows/deploy.yml, which had not built
+# anything since late July: that file asks for `hanzo-build-linux-amd64`, and on
+# GitHub that label is advertised by nothing since the ARC scale set was
+# decommissioned. An unclaimable job does not fail — it waits out the timeout
+# while the next push queues behind it, which is why the last run there was
+# cancelled after five hours.
+#
+# A TAG IS THE RELEASE. The version is the git tag with its `v` dropped, so the
+# image tag, the git tag and the universe pin are one string with one origin.
+# A branch push builds nothing: an image nobody pinned is an image nobody runs,
+# and cutting one per commit only makes the registry harder to read.
+#
+# The pin is not here. cd.hanzo.ai watches hanzoai/universe, not the registry, so
+# a release ends at `charts/app/pin.sh models <version>` in that repo.
+
+permissions:
+  contents: read
+  packages: write
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag (X.Y.Z — the next patch after the live universe pin)'
+        required: true
+        type: string
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOCKER_BUILD_SUMMARY: "false"
+  DOCKER_BUILD_RECORD_UPLOAD: "false"
+
+jobs:
+  build:
+    runs-on: [hanzo-build-linux-amd64]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the version
+        id: v
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.tag }}" ]; then
+            version="${{ inputs.tag }}"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          case "$version" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::'$version' is not X.Y.Z"; exit 1 ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "building ghcr.io/hanzoai/models:$version"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+          driver-opts: |
+            network=host
+
+      # The runner is shared, so a credential left behind by the previous job is
+      # the credential this one would push with.
+      - name: Reset the Docker credential store
+        run: |
+          mkdir -p "$HOME/.docker"
+          printf '{}' > "$HOME/.docker/config.json"
+
+      - name: Sign in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: hanzo-dev
+          password: ${{ secrets.GH_PAT }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          tags: ghcr.io/hanzoai/models:${{ steps.v.outputs.version }}
+          provenance: false
+          push: true
+
+      # A push that answered 200 is not a manifest the registry will serve — pin
+      # an image the registry cannot resolve and there is no rollback.
+      - name: Prove the pushed image resolves
+        run: |
+          set -euo pipefail
+          img="ghcr.io/hanzoai/models:${{ steps.v.outputs.version }}"
+          for i in 1 2 3 4 5 6; do
+            if docker buildx imagetools inspect "$img" >/dev/null 2>&1; then
+              echo "resolved $img"; exit 0
+            fi
+            echo "manifest not visible yet (attempt ${i}/6) — retrying"; sleep 5
+          done
+          echo "::error::${img} never resolved"; exit 1
