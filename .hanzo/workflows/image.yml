@@ -2,7 +2,7 @@ name: Image
 
 # The image for models.hanzo.ai, built on the native runners (git.hanzo.ai →
 # git-runner). It replaces .github/workflows/deploy.yml, which had not built
-# anything since late July: that file asks for `hanzo-build-linux-amd64`, and on
+# anything since late July: that file asks for `linux-amd64`, and on
 # GitHub that label is advertised by nothing since the ARC scale set was
 # decommissioned. An unclaimable job does not fail — it waits out the timeout
 # while the next push queues behind it, which is why the last run there was
@@ -40,7 +40,7 @@ env:
 
 jobs:
   build:
-    runs-on: [hanzo-build-linux-amd64]
+    runs-on: [linux-amd64]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
