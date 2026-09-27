@@ -112,6 +112,8 @@ const zenCatalog = {
   'zen-embedding':    { fullName: 'Zen Embedding — Open', description: 'Open-weight embedding model.', features: ['8K context', 'Embeddings'], tier: 'pro', context: 8000, specs: { params: 'N/A', arch: 'Embedding' }, generation: 'foundation', category: 'embedding', endpoint: '/v1/embeddings' },
   'zen-reranker':     { fullName: 'Zen Reranker — Open', description: 'Open-weight reranker model.', features: ['8K context', 'Reranking'], tier: 'pro', context: 8000, specs: { params: 'N/A', arch: 'Reranker' }, generation: 'foundation', category: 'embedding', endpoint: '/v1/rerank' },
   'zen-agent':        { fullName: 'Zen Agent', description: 'Agent-optimized model for tool use and planning.', features: ['131K context', 'Tool use', 'Planning'], tier: 'pro', context: 131000, specs: { params: '32B', arch: 'Dense' }, generation: 'foundation', category: 'agents' },
+  // Kai — decisions, not generation: typed questions in, calibrated distributions out.
+  'kai':              { fullName: 'Kai — Decisions', description: "Hanzo's decision model. Answers typed questions about a state (choice, noul, score) with calibrated distributions instead of generated text. Each option is encoded alone and scored against the state, so the answer does not depend on option order.", features: ['choice · noul · score', 'Calibrated distributions', 'Multilingual', 'No generated tokens'], specs: { params: 'N/A', arch: 'Encoder + per-option scoring' }, generation: 'kai', category: 'decision', endpoint: '/v1/decisions' },
 }
 
 // ── Model families ──────────────────────────────────────────────────────
@@ -128,6 +130,7 @@ const zenFamilies = [
   { id: 'vision', name: 'Vision (Open Weights)', description: 'Vision-language open-weight models.', icon: 'Eye', models: ['zen-vl', 'zen-omni'] },
   { id: 'safety', name: 'Safety', description: 'Content moderation and safety guardrail models.', icon: 'Shield', models: ['zen3-guard', 'zen-guard'] },
   { id: 'agents', name: 'Agents', description: 'Agent-optimized models for tool use and planning.', icon: 'Network', models: ['zen-agent'] },
+  { id: 'decision', name: 'Decision', description: 'Typed, calibrated answers to bounded questions via /v1/decisions.', icon: 'Scale', models: ['kai'] },
 ]
 
 // ── Discovery ───────────────────────────────────────────────────────────
